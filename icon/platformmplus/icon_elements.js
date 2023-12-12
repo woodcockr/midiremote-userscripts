@@ -530,6 +530,50 @@ function makeTransport(surface, midiInput, midiOutput, x, y, surfaceElements) {
   return transport
 }
 
+function updateDisplay(/** @type {string} */ row1, /** @type {string} */ row2, /** @type {string} */ indicator1, /** @type {string} */ indicator2 ,/** @type {MR_ActiveDevice} */activeDevice, /** @type {MR_DeviceMidiOutput} */midiOutput) {
+  // Indicators for the Zoom and Jog function subpages
+  function _display_indicator(row, indicator) {
+    var data = [0xf0, 0x00, 0x00, 0x66, 0x14, 0x12,
+    ]
+    if (row === 0) {
+      data.push(55)
+    } else {
+      data.push(111)
+    }
+    data.push(indicator.charCodeAt(0))
+    data.push(0xf7)
+    midiOutput.sendMidi(activeDevice, data)
+  }
+
+  function _sendDisplayData(row, text) {
+    var lenText = text.length < 56 ? text.length : 56
+    var data = [0xf0, 0x00, 0x00, 0x66, 0x14, 0x12]
+    var out = data.concat(56 * row) // Row 1 offset
+
+    for (var i = 0; i < lenText; ++i)
+      out.push(text.charCodeAt(i))
+    while (lenText++ < 56)
+      out.push(0x20) // spaces for the rest
+    out.push(0xf7)
+    midiOutput.sendMidi(activeDevice, out)
+
+  }
+
+  if (row1 != '') {
+
+  }
+  if (row2 != '') {
+
+  }
+  if (indicator1 != '') {
+    _display_indicator(1, indicator1)
+  }
+  if (indicator2 != '') {
+    _display_indicator(0, indicator2)
+  }
+
+}
+
 module.exports = {
   makeChannelControl,
   makeMasterControl,
@@ -538,5 +582,13 @@ module.exports = {
   makeTouchFader,
   bindCommandKnob,
   clearAllLeds,
+  updateDisplay,
   Helper_updateDisplay
 }
+
+// var text = '{ "employees" : [' +
+// '{ "firstName":"John" , "lastName":"Doe" },' +
+// '{ "firstName":"Anna" , "lastName":"Smith" },' +
+// '{ "firstName":"Peter" , "lastName":"Jones" } ]}';
+// const obj = JSON.parse(text);
+// console.log(obj["employees"][2].lastName)

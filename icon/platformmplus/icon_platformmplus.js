@@ -4,17 +4,22 @@
 // Portions of this implementation where inspired by other midi remote creates to whom I wish to say thank you!
 // - Mackie C4 by Ron Garrison <ron.garrison@gmail.com> https://github.com/rwgarrison/midiremote-userscripts
 
+var config = require('./config.js')
 var iconElements = require('./icon_elements.js')
 var makeChannelControl = iconElements.makeChannelControl
 var makeMasterControl = iconElements.makeMasterControl
 var makeTransport = iconElements.makeTransport
 var clearAllLeds = iconElements.clearAllLeds
+var updateDisplay = iconElements.updateDisplay
 var Helper_updateDisplay = iconElements.Helper_updateDisplay
 
-var helper = require('./helper')
+var helper = require('./helper.js')
 var makeLabel = helper.display.makeLabel
 var setTextOfColumn = helper.display.setTextOfColumn
 var setTextOfLine = helper.display.setTextOfLine
+
+var master_controls = require('./master_controls.js')
+var control_room = require('./control_room.js')
 //-----------------------------------------------------------------------------
 // 1. DRIVER SETUP - create driver object, midi ports and detection information
 //-----------------------------------------------------------------------------
@@ -37,11 +42,6 @@ deviceDriver.mOnActivate = function (activeDevice) {
     activeDevice.setState('lastTime', Date.now().toString())
 }
 
-// define all possible namings the devices MIDI ports could have
-// NOTE: Windows and MacOS handle port naming differently
-// deviceDriver.makeDetectionUnit().detectPortPair(midiInput, midiOutput)
-//     .expectInputNameEquals('Platform M+ V2.15') // Platform M+ v2.15
-//     .expectOutputNameEquals('Platform M+ V2.15') // Platform M+ v2.15
 deviceDriver.makeDetectionUnit().detectPortPair(midiInput, midiOutput)
     .expectInputNameContains('Platform M+')
     .expectOutputNameContains('Platform M+')
@@ -193,109 +193,14 @@ function makeSubPage(subPageArea, name) {
                         break;
                 }
                 break;
-            default:
-                // WIP activeSubPage for these is non-sensical as they are global
-                switch (activeSubPage) {
-                    case "Scrub":
-                        activeDevice.setState("indicator2", "S")
-                        break;
-                    case "Nudge":
-                        activeDevice.setState("indicator2", "N")
-                        break;
-                    case "Nav":
-                        activeDevice.setState("indicator1", "N")
-                        break;
-                    case "Zoom":
-                        activeDevice.setState("indicator1", "Z")
-                        break;
-                }
-            // ! Do not set activeSubPage for these
-            break;
         }
         Helper_updateDisplay('Row1', 'Row2', 'AltRow1', 'AltRow2', activeDevice, midiOutput)
     }).bind({ name })
     return subPage
 }
-/**
- * @param {string} name
-*/
-// Mappings for the default areas - transport, zoom, knob
-function makePageWithDefaults(name) {
-    var page = deviceDriver.mMapping.makePage(name)
-    var jogSubPageArea = page.makeSubPageArea('Jog')
-    var zoomSubPageArea = page.makeSubPageArea('Zoom')
-    var subPageJogNudge = makeSubPage(jogSubPageArea, 'Nudge')
-    var subPageJogScrub = makeSubPage(jogSubPageArea, 'Scrub')
-    var subPageJogZoom = makeSubPage(zoomSubPageArea, 'Zoom')
-    var subPageJobNav = makeSubPage(zoomSubPageArea, 'Nav')
-
-    // Transport controls
-    page.makeActionBinding(surfaceElements.transport.prevChn.mSurfaceValue, deviceDriver.mAction.mPrevPage)
-    page.makeActionBinding(surfaceElements.transport.nextChn.mSurfaceValue, deviceDriver.mAction.mNextPage)
-    page.makeCommandBinding(surfaceElements.transport.prevBnk.mSurfaceValue, 'Transport', 'Locate Previous Marker')
-    page.makeCommandBinding(surfaceElements.transport.nextBnk.mSurfaceValue, 'Transport', 'Locate Next Marker')
-    page.makeValueBinding(surfaceElements.transport.btnForward.mSurfaceValue, page.mHostAccess.mTransport.mValue.mForward)
-    page.makeValueBinding(surfaceElements.transport.btnRewind.mSurfaceValue, page.mHostAccess.mTransport.mValue.mRewind)
-    page.makeValueBinding(surfaceElements.transport.btnStart.mSurfaceValue, page.mHostAccess.mTransport.mValue.mStart).setTypeToggle()
-    page.makeValueBinding(surfaceElements.transport.btnStop.mSurfaceValue, page.mHostAccess.mTransport.mValue.mStop).setTypeToggle()
-    page.makeValueBinding(surfaceElements.transport.btnRecord.mSurfaceValue, page.mHostAccess.mTransport.mValue.mRecord).setTypeToggle()
-    page.makeValueBinding(surfaceElements.transport.btnCycle.mSurfaceValue, page.mHostAccess.mTransport.mValue.mCycleActive).setTypeToggle()
-
-    // Zoom Pages - when either Zoom light is on
-    page.makeCommandBinding(surfaceElements.transport.zoomVertIn.mSurfaceValue, 'Zoom', 'Zoom In Vertically').setSubPage(subPageJogZoom)
-    page.makeCommandBinding(surfaceElements.transport.zoomVertOut.mSurfaceValue, 'Zoom', 'Zoom Out Vertically').setSubPage(subPageJogZoom)
-    page.makeCommandBinding(surfaceElements.transport.zoomHorizIn.mSurfaceValue, 'Zoom', 'Zoom In').setSubPage(subPageJogZoom)
-    page.makeCommandBinding(surfaceElements.transport.zoomHorizOut.mSurfaceValue, 'Zoom', 'Zoom Out').setSubPage(subPageJogZoom)
-    // Nav Pages
-    page.makeActionBinding(surfaceElements.transport.zoomVertIn.mSurfaceValue, page.mHostAccess.mTrackSelection.mAction.mNextTrack).setSubPage(subPageJobNav)
-    page.makeActionBinding(surfaceElements.transport.zoomVertOut.mSurfaceValue, page.mHostAccess.mTrackSelection.mAction.mPrevTrack).setSubPage(subPageJobNav)
-    page.makeCommandBinding(surfaceElements.transport.zoomHorizIn.mSurfaceValue, 'Transport', 'Locate Next Event').setSubPage(subPageJobNav)
-    page.makeCommandBinding(surfaceElements.transport.zoomHorizOut.mSurfaceValue, 'Transport', 'Locate Previous Event').setSubPage(subPageJobNav)
-    // Switch Zoom and Nav via simultaneous press of Zoom buttons
-    page.makeActionBinding(surfaceElements.transport.btnZoomOnOff.mSurfaceValue, zoomSubPageArea.mAction.mNext)
-    // page.makeActionBinding(surfaceElements.transport.zoomState.mSurfaceValue, zoomSubPageArea.mAction.mNext)
-
-    // Jog Pages - when Zoom lights are off
-    // Nudge
-    page.makeCommandBinding(surfaceElements.transport.jogLeftVariable, 'Transport', 'Nudge Cursor Left').setSubPage(subPageJogNudge)
-    page.makeCommandBinding(surfaceElements.transport.jogRightVariable, 'Transport', 'Nudge Cursor Right').setSubPage(subPageJogNudge)
-    // Scrub (Jog in Cubase)
-    page.makeCommandBinding(surfaceElements.transport.jogLeftVariable, 'Transport', 'Jog Left').setSubPage(subPageJogScrub)
-    page.makeCommandBinding(surfaceElements.transport.jogRightVariable, 'Transport', 'Jog Right').setSubPage(subPageJogScrub)
-    // Switch between Nudge and Scrub by tapping knob
-    page.makeActionBinding(surfaceElements.transport.jog_wheel.mPushValue, jogSubPageArea.mAction.mNext)
-
-    var MasterFaderSubPageArea = page.makeSubPageArea('MasterFader')
-    var subPageMasterFaderValue = makeSubPage(MasterFaderSubPageArea, 'MF_ValueUnderCursor')
-
-    page.makeValueBinding(surfaceElements.faderMaster.fader.mSurfaceValue, page.mHostAccess.mMouseCursor.mValueUnderMouse).setValueTakeOverModeJump().setSubPage(subPageMasterFaderValue)
-
-    // Automation for selected tracks
-    var selectedTrackChannel = page.mHostAccess.mTrackSelection.mMixerChannel
-
-    // Automation for selected tracks
-    page.makeValueBinding(surfaceElements.faderMaster.read_button.mSurfaceValue, selectedTrackChannel.mValue.mAutomationRead).setTypeToggle()
-    page.makeValueBinding(surfaceElements.faderMaster.write_button.mSurfaceValue, selectedTrackChannel.mValue.mAutomationWrite).setTypeToggle()
-
-    // Mixer Button
-    var display_type = page.mCustom.makeHostValueVariable("Mixer - display type")
-    page.makeValueBinding(surfaceElements.faderMaster.mixer_button.mSurfaceValue, display_type).setTypeToggle().mOnValueChange = function (activeDevice, mapping, value, value2) {
-        // console.log("display_type OnValueChange:"+value+":"+value2)
-        if(value===0)
-        {
-            activeDevice.setState("displayType", "Fader")
-        } else {
-            activeDevice.setState("displayType", "Pan")
-        }
-        // Update controller
-        Helper_updateDisplay(activeDevice.getState('Display - idRow1'), activeDevice.getState('Display - idRow2'), activeDevice.getState('Display - idAltRow1'), activeDevice.getState('Display - idAltRow2'), activeDevice, midiOutput)
-    }
-
-    return page
-}
 
 function makePageMixer() {
-    var page = makePageWithDefaults('Mixer')
+    var page = master_controls.makePageWithDefaults('Mixer', surfaceElements, deviceDriver, midiOutput)
 
     var FaderSubPageArea = page.makeSubPageArea('FadersKnobs')
     var subPageFaderVolume = makeSubPage(FaderSubPageArea, 'Volume')
@@ -329,11 +234,19 @@ function makePageMixer() {
         page.makeValueBinding(rec_buttonSurfaceValue, hostMixerBankChannel.mValue.mRecordEnable).setTypeToggle().setSubPage(subPageButtonDefaultSet)
     }
 
+    page.mOnActivate = function (/** @type {MR_ActiveDevice} */activeDevice) {
+        // console.log('from script: Platform M+ page "Mixer" activated')
+        activeDevice.setState("activePage", "Mixer")
+        activeDevice.setState("activeSubPage", "Default")
+        clearAllLeds(activeDevice, midiOutput)
+        clearChannelState(activeDevice)
+    }
+
     return page
 }
 
 function makePageSelectedTrack() {
-    var page = makePageWithDefaults('Selected Channel')
+    var page = master_controls.makePageWithDefaults('Selected Channel', surfaceElements, deviceDriver, midiOutput)
 
     var faderSubPageArea = page.makeSubPageArea('Faders')
     var subPageSendsQC = makeSubPage(faderSubPageArea, 'SendsQC')
@@ -482,11 +395,24 @@ function makePageSelectedTrack() {
     page.makeValueBinding(fader2SurfaceValue, preFilter.mHighCutFreq).setSubPage(subPagePreFilter)
     page.makeValueBinding(fader3SurfaceValue, preFilter.mLowCutFreq).setSubPage(subPagePreFilter)
 
+    page.mOnActivate = function (/** @type {MR_ActiveDevice} */activeDevice) {
+        // console.log('from script: Platform M+ page "Selected Track" activated')
+        activeDevice.setState("activePage", "SelectedTrack")
+        activeDevice.setState("activeSubPage", "SendsQC")
+        clearAllLeds(activeDevice, midiOutput)
+        clearChannelState(activeDevice)
+        // Set the Rec leds which correspond to the different subages to their starting state
+        midiOutput.sendMidi(activeDevice, [0x90, 0, 127])
+        midiOutput.sendMidi(activeDevice, [0x90, 1, 0])
+        midiOutput.sendMidi(activeDevice, [0x90, 2, 0])
+        midiOutput.sendMidi(activeDevice, [0x90, 3, 0])
+    }
+
     return page
 }
 
 function makePageChannelStrip() {
-    var page = makePageWithDefaults('ChannelStrip')
+    var page = master_controls.makePageWithDefaults('ChannelStrip', surfaceElements, deviceDriver, midiOutput)
 
     var strip = page.makeSubPageArea('Strip')
     var gatePage = makeSubPage(strip, 'Gate')
@@ -532,6 +458,19 @@ function makePageChannelStrip() {
     page.makeActionBinding(surfaceElements.channelControls[3].sel_button.mSurfaceValue, saturatorPage.mAction.mActivate)
     page.makeActionBinding(surfaceElements.channelControls[4].sel_button.mSurfaceValue, limiterPage.mAction.mActivate)
 
+    page.mOnActivate = function (/** @type {MR_ActiveDevice} */activeDevice) {
+        // console.log('from script: Platform M+ page "Channel Strip" activated')
+        activeDevice.setState("activePage", "ChannelStrip")
+        activeDevice.setState("activeSubPage", "Gate")
+        clearAllLeds(activeDevice, midiOutput)
+        clearChannelState(activeDevice)
+        midiOutput.sendMidi(activeDevice, [0x90, 24, 127])
+        midiOutput.sendMidi(activeDevice, [0x90, 25, 0])
+        midiOutput.sendMidi(activeDevice, [0x90, 26, 0])
+        midiOutput.sendMidi(activeDevice, [0x90, 27, 0])
+        midiOutput.sendMidi(activeDevice, [0x90, 28, 0])
+    }
+
 //     page.mOnIdle = function(activeDevice, activeMapping) {
 //         var now = Date.now()
 //         var lastTime = Number(activeDevice.getState('lastTime'))
@@ -548,44 +487,14 @@ function makePageChannelStrip() {
     return page
 }
 
-function makePageControlRoom() {
-    var page = makePageWithDefaults('ControlRoom')
-
-    var controlRoom = page.mHostAccess.mControlRoom
-
-    // Main
-    page.makeValueBinding(surfaceElements.channelControls[0].fader.mSurfaceValue, controlRoom.mMainChannel.mLevelValue).setValueTakeOverModeJump()
-    page.makeValueBinding(surfaceElements.channelControls[0].mute_button.mSurfaceValue, controlRoom.mMainChannel.mMuteValue).setTypeToggle()
-    page.makeValueBinding(surfaceElements.channelControls[0].sel_button.mSurfaceValue, controlRoom.mMainChannel.mMetronomeClickActiveValue).setTypeToggle()
-    // Phones[0]
-    page.makeValueBinding(surfaceElements.channelControls[1].fader.mSurfaceValue, controlRoom.getPhonesChannelByIndex(0).mLevelValue).setValueTakeOverModeJump()
-    page.makeValueBinding(surfaceElements.channelControls[1].mute_button.mSurfaceValue, controlRoom.getPhonesChannelByIndex(0).mMuteValue).setTypeToggle()
-    page.makeValueBinding(surfaceElements.channelControls[1].sel_button.mSurfaceValue, controlRoom.getPhonesChannelByIndex(0).mMetronomeClickActiveValue).setTypeToggle()
-
-    var maxCueSends = controlRoom.getMaxCueChannels() < 8 ? controlRoom.getMaxCueChannels() : 8
-
-    for (var i = 0; i < maxCueSends; ++i) {
-        var cueSend = controlRoom.getCueChannelByIndex(i)
-
-        var knobSurfaceValue = surfaceElements.channelControls[i].pushEncoder.mEncoderValue;
-        var knobPushValue = surfaceElements.channelControls[i].pushEncoder.mPushValue;
-
-        page.makeValueBinding(knobSurfaceValue, cueSend.mLevelValue)
-        page.makeValueBinding(knobPushValue, cueSend.mMuteValue).setTypeToggle()
-
-    }
-
-    return page
-}
-
 function makePageMidi() {
-    var page = makePageWithDefaults('Midi')
+    var page = master_controls.makePageWithDefaults('Midi', surfaceElements, deviceDriver, midiOutput)
 
     function makeMidiCCBinding( /** @type {MR_FactoryMappingPage} */page, /** @type {string} */displayName, /** @type {number} */cc, /** @type {number} */fader) {
         // ? I have no idea what page.mCustom.makeHostValueVariable actually does- all I know is I can make a value binding this way. I can't seem to be able to look it up
         // ? or access it all once made.
         page.makeValueBinding(surfaceElements.channelControls[fader].fader.mSurfaceValue, page.mCustom.makeHostValueVariable(displayName)).setValueTakeOverModeJump()
-            .mOnValueChange = function (activeDevice, mapping, value, value2) {
+            .mOnValueChange = (function (activeDevice, mapping, value, value2) {
                 // console.log(displayName + ":" + mapping + "::" + value + "::" + value2)
                 var activePage = activeDevice.getState("activePage")
                 var activeSubPage = activeDevice.getState("activeSubPage")
@@ -599,18 +508,41 @@ function makePageMidi() {
                 var value2 = Math.floor(pitchBendValue / 128)
 
                 // this is the value going back to the icon Fader
-                midiOutput.sendMidi(activeDevice, [0xE0 + fader, value1, value2])
+                midiOutput.sendMidi(activeDevice, [0xE0 + this.fader, value1, value2])
                 // this is the value going back to Cubendo
-                midiPageOutput.sendMidi(activeDevice, [0xB0, cc, ccValue])
+                midiPageOutput.sendMidi(activeDevice, [0xB0, this.cc, ccValue])
                 // and this updates the D2 Display
-                activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', setTextOfColumn(fader, makeLabel(displayName, 6), faderValueTitles))
-                activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - Values', setTextOfColumn(fader, makeLabel(ccValue.toString(), 6), faderValues))
+                activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', setTextOfColumn(this.fader, makeLabel(this.displayName, 6), faderValueTitles))
+                activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - Values', setTextOfColumn(this.fader, makeLabel(ccValue.toString(), 6), faderValues))
                 Helper_updateDisplay(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', activePage + "- " + activeSubPage + ' - Fader - Values', activePage + "- " + activeSubPage + ' - Pan - ValueTitles', activePage + "- " + activeSubPage + ' - Pan - Values', activeDevice, midiOutput)
-            }
+            }).bind({displayName, cc, fader})
     }
 
-    makeMidiCCBinding(page, "CC1", 1, 0)
-    makeMidiCCBinding(page, "CC11", 11, 1)
+    var cc = config.midi.cc
+    for (var i = 0; i < surfaceElements.numStrips; ++i) {
+        makeMidiCCBinding(page, cc[i].title, cc[i].cc, i)
+    }
+
+    page.mOnActivate = function (/** @type {MR_ActiveDevice} */activeDevice) {
+        // console.log('from script: Platform M+ page "Midi" activated')
+        var activePage = "Midi"
+        var activeSubPage = "Default"
+        activeDevice.setState("activePage", activePage)
+        activeDevice.setState("activeSubPage", activeSubPage)
+        clearAllLeds(activeDevice, midiOutput)
+        clearChannelState(activeDevice)
+
+        var faderValueTitles = activeDevice.getState(activePage + "- " + activeSubPage + ' - Fader - ValueTitles')
+        var faderValues = activeDevice.getState(activePage + "- " + activeSubPage + ' - Fader - Values')
+        var cc = config.midi.cc
+        for (var i = 0; i < surfaceElements.numStrips; ++i) {
+            faderValueTitles = setTextOfColumn(i, makeLabel(cc[i].title, 6), faderValueTitles)
+            faderValues = setTextOfColumn(i, makeLabel("?", 6), faderValues)
+        }
+        activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', setTextOfLine(faderValueTitles))
+        activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - Values', setTextOfLine(faderValues))
+        Helper_updateDisplay(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', activePage + "- " + activeSubPage + ' - Fader - Values', activePage + "- " + activeSubPage + ' - Pan - ValueTitles', activePage + "- " + activeSubPage + ' - Pan - Values', activeDevice, midiOutput)
+    }
 
     return page
 }
@@ -619,7 +551,7 @@ function makePageMidi() {
 var mixerPage = makePageMixer()
 var selectedTrackPage = makePageSelectedTrack()
 var channelStripPage = makePageChannelStrip()
-var controlRoomPage = makePageControlRoom()
+var controlRoomPage = control_room.makePage(surfaceElements, deviceDriver, midiOutput)
 var midiPage = makePageMidi()
 
 // Function to clear out the Channel State for the display titles/values
@@ -640,62 +572,11 @@ function clearChannelState(/** @type {MR_ActiveDevice} */activeDevice) {
 
     activeDevice.setState("displayType", "Fader")
 }
-mixerPage.mOnActivate = (function (/** @type {MR_ActiveDevice} */activeDevice) {
-    // console.log('from script: Platform M+ page "Mixer" activated')
-    activeDevice.setState("activePage", "Mixer")
-    activeDevice.setState("activeSubPage", "Default")
-    clearAllLeds(activeDevice, midiOutput)
-    clearChannelState(activeDevice)
-}).bind({ midiOutput })
 
-selectedTrackPage.mOnActivate = (function (/** @type {MR_ActiveDevice} */activeDevice) {
-    // console.log('from script: Platform M+ page "Selected Track" activated')
-    activeDevice.setState("activePage", "SelectedTrack")
-    activeDevice.setState("activeSubPage", "SendsQC")
-    clearAllLeds(activeDevice, midiOutput)
-    clearChannelState(activeDevice)
-    // Set the Rec leds which correspond to the different subages to their starting state
-    midiOutput.sendMidi(activeDevice, [0x90, 0, 127])
-    midiOutput.sendMidi(activeDevice, [0x90, 1, 0])
-    midiOutput.sendMidi(activeDevice, [0x90, 2, 0])
-    midiOutput.sendMidi(activeDevice, [0x90, 3, 0])
-}).bind({ midiOutput })
 
-channelStripPage.mOnActivate = (function (/** @type {MR_ActiveDevice} */activeDevice) {
-    // console.log('from script: Platform M+ page "Channel Strip" activated')
-    activeDevice.setState("activePage", "ChannelStrip")
-    activeDevice.setState("activeSubPage", "Gate")
-    clearAllLeds(activeDevice, midiOutput)
-    clearChannelState(activeDevice)
-    midiOutput.sendMidi(activeDevice, [0x90, 24, 127])
-    midiOutput.sendMidi(activeDevice, [0x90, 25, 0])
-    midiOutput.sendMidi(activeDevice, [0x90, 26, 0])
-    midiOutput.sendMidi(activeDevice, [0x90, 27, 0])
-    midiOutput.sendMidi(activeDevice, [0x90, 28, 0])
-    // Helper_updateDisplay("ChannelStrip" + "- " + "Gate" + ' - Fader - ValueTitles', "ChannelStrip" + "- " + "Gate" + ' - Fader - Values', "ChannelStrip" + "- " + "Gate" + ' - Pan - ValueTitles', "ChannelStrip" + "- " + "Gate" + ' - Pan - Values', activeDevice, midiOutput)
-}).bind({ midiOutput })
 
-controlRoomPage.mOnActivate = (function (/** @type {MR_ActiveDevice} */activeDevice) {
-    // console.log('from script: Platform M+ page "ControlRoom" activated')
-    activeDevice.setState("activePage", "ControlRoom")
-    activeDevice.setState("activeSubPage", "Default")
-    clearAllLeds(activeDevice, midiOutput)
-    clearChannelState(activeDevice)
-}).bind({ midiOutput })
 
-midiPage.mOnActivate = function (/** @type {MR_ActiveDevice} */activeDevice) {
-    // console.log('from script: Platform M+ page "Midi" activated')
-    var activePage = "Midi"
-    var activeSubPage = "Default"
-    activeDevice.setState("activePage", activePage)
-    activeDevice.setState("activeSubPage", activeSubPage)
-    clearAllLeds(activeDevice, midiOutput)
-    clearChannelState(activeDevice)
-    // ! This init must match the CC bindings create in the makeMidiPage function - it's annoying and needs a refactor
-    // WIP Refactor me
-    var faderValueTitles = activeDevice.getState(activePage + "- " + activeSubPage + ' - Fader - ValueTitles')
-    faderValueTitles = setTextOfColumn(0, makeLabel("CC1", 6), faderValueTitles)
-    faderValueTitles = setTextOfColumn(1, makeLabel("CC11", 6), faderValueTitles)
-    activeDevice.setState(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', setTextOfLine(faderValueTitles))
-    Helper_updateDisplay(activePage + "- " + activeSubPage + ' - Fader - ValueTitles', activePage + "- " + activeSubPage + ' - Fader - Values', activePage + "- " + activeSubPage + ' - Pan - ValueTitles', activePage + "- " + activeSubPage + ' - Pan - Values', activeDevice, midiOutput)
-}
+
+
+
+
